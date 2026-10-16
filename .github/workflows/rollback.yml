@@ -1,0 +1,69 @@
+name: rollback
+
+# Actions タブから手動で実行する「一つ前に戻す」ボタン
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 戻す環境
+        type: choice
+        options: [production, staging]
+        default: production
+      revision:
+        description: 戻し先のリビジョン番号 (空なら今の一つ前)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    # 本番を戻す操作も同じ承認ルールとロールを通る
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Roll back ECS service
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SERVICE: ${{ vars.ECS_SERVICE }}
+          REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          current=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          family=$(echo "$current" | sed -E 's#.*/([^:]+):[0-9]+$#\1#')
+          current_rev=${current##*:}
+
+          if [ -n "$REVISION" ]; then
+            [[ "$REVISION" =~ ^[0-9]+$ ]] || { echo "::error::revision は数字で指定してください"; exit 1; }
+            target="$family:$REVISION"
+          else
+            # 今動いているものより古いリビジョンのうち、一番新しいもの
+            target=$(aws ecs list-task-definitions --family-prefix "$family" --sort DESC \
+              --query 'taskDefinitionArns' --output text | tr '\t' '\n' \
+              | awk -F: -v cur="$current_rev" '$NF < cur {print; exit}')
+            [ -n "$target" ] || { echo "::error::戻し先のリビジョンがありません"; exit 1; }
+          fi
+
+          image=$(aws ecs describe-task-definition --task-definition "$target" \
+            --query 'taskDefinition.containerDefinitions[0].image' --output text)
+          echo "### Rollback ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- from: \`$current\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- to: \`$target\` (\`$image\`)" >> "$GITHUB_STEP_SUMMARY"
+
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$target" --query 'service.taskDefinition' --output text
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+          echo "rolled back to $target"

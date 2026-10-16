@@ -1,0 +1,71 @@
+name: deploy
+
+# pipeline.yml から staging / production 共通で呼ばれる部品
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      image:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # この行があることで、environment の承認ルールが適用され、
+    # OIDC トークンの sub が environment:<名前> になる (= その環境用ロールしか引き受けられない)
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ vars.APP_URL }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # 今動いているタスク定義を土台にして、イメージだけ差し替える
+      - name: Download current task definition
+        run: |
+          current=$(aws ecs describe-services \
+            --cluster "${{ vars.ECS_CLUSTER }}" --services "${{ vars.ECS_SERVICE }}" \
+            --query 'services[0].taskDefinition' --output text)
+          echo "current: $current"
+          # 初回だけ入っている仮サーバー用の command を消し、Dockerfile の CMD で起動させる
+          aws ecs describe-task-definition --task-definition "$current" --query taskDefinition \
+            | jq 'del(.containerDefinitions[0].command)' > task-definition.json
+
+      - id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: app
+          image: ${{ inputs.image }}
+          environment-variables: |
+            APP_VERSION=${{ github.sha }}
+
+      - uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          service: ${{ vars.ECS_SERVICE }}
+          wait-for-service-stability: true
+
+      # 外から叩いて、本当に今回のコミットが動いているか確かめる
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 12); do
+            body=$(curl -fsS "${{ vars.APP_URL }}/healthz" || true)
+            echo "$body"
+            if echo "$body" | grep -q '"version":"${{ github.sha }}"'; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::新しいバージョンが応答しません"
+          exit 1

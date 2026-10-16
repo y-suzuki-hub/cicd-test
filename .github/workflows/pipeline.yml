@@ -1,0 +1,108 @@
+name: pipeline
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 何もしない限りトークンには権限を与えない。必要なジョブだけ個別に付ける。
+permissions:
+  contents: read
+
+# main への push が連続しても、デプロイが同時に走って追い越さないよう一列に並べる
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ① テスト
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # ② 秘密情報・脆弱性チェック (ソースと依存パッケージ)
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 過去のコミットに紛れた鍵も探すため全履歴を取得
+      - name: Secret scan (gitleaks)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git /repo --redact --verbose
+      - name: Dependency vulnerability scan (trivy fs)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+  # ③ コンテナ作成 → イメージの脆弱性チェック → ECR へ push
+  build:
+    needs: [test, scan]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC トークンを発行するのに必要
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.BUILD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - id: meta
+        run: echo "image=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      # まずローカルに作るだけ。スキャンに通ったものだけ push する。
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: ${{ steps.meta.outputs.image }}
+      - name: Image vulnerability scan (trivy image)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+      - run: docker push "${{ steps.meta.outputs.image }}"
+
+  # ④ 確認用環境へ自動公開
+  deploy-staging:
+    needs: build
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      image: ${{ needs.build.outputs.image }}
+    permissions:
+      contents: read
+      id-token: write
+
+  # ⑤ 承認 → ⑥ 本番へ公開
+  # production 環境に「Required reviewers」を設定しておくと、ここで承認待ちで止まる。
+  # 本番に出るのは「確認用で動作確認済みの、まったく同じイメージ」。
+  deploy-production:
+    needs: [build, deploy-staging]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      image: ${{ needs.build.outputs.image }}
+    permissions:
+      contents: read
+      id-token: write

@@ -1,0 +1,5 @@
+github_repo = "yourname/cicd-demo"
+# 既にこのAWSアカウントで GitHub OIDC プロバイダーを作ってある場合は false
+# create_oidc_provider = false
+# 2026-07-15 以降に作ったリポジトリの場合 (GUIDE.md の手順2を参照)
+# github_sub_repo = "yourname@12345678/cicd-demo@987654321"
