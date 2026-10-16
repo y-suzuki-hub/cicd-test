@@ -39,7 +39,7 @@ terraform -version
 
 ---
 
-## ステップ4: アプリを手元で動かしてみる
+## ✅ ステップ4: アプリを手元で動かしてみる(完了)
 
 **やること**:
 
@@ -49,9 +49,22 @@ npm test
 
 **できたかの確認**: `pass 3` / `fail 0` と表示されれば OK です。
 
+**ブラウザで見たいとき**:
+
+```bash
+npm start
+```
+
+`listening on :3000` と出たら、ブラウザで次を開きます。
+
+- http://localhost:3000 → `Hello from cicd-demo` と `version: dev`
+- http://localhost:3000/healthz → `{"status":"ok","version":"dev"}`
+
+見終わったら、ターミナルで `Ctrl + C` を押して止めます。
+
 ---
 
-## ステップ5: GitHub にリポジトリを作って送る
+## ✅ ステップ5: GitHub にリポジトリを作って送る(完了)
 
 **やること**: 下の2つを順に実行します。
 
@@ -72,7 +85,7 @@ gh repo create cicd-test --public --source . --push
 
 ---
 
-## ステップ6: AWS 側を作る
+## ✅ ステップ6: AWS 側を作る(完了)
 
 **やること**: 下の4つを順に実行します。
 
@@ -106,13 +119,18 @@ terraform apply
 terraform output
 ```
 
-どちらも `placeholder` と表示されれば OK です(表示されるまで1〜2分かかることがあります)。
+表示は2つの部分に分かれています。
+
+- 上の `gh_variable_commands = <<EOT ... EOT`: ステップ7で使う GitHub 登録用のコマンド。**ここでは何もしなくてよい**
+- 一番下の `production_url` と `staging_url`: この2つの URL をブラウザで開く
+
+どちらの URL も `placeholder` と表示されれば OK です(表示されるまで1〜2分かかることがあります)。
 
 > `EntityAlreadyExists` というエラーで止まった場合は、`terraform.tfvars` の最後に `create_oidc_provider = false` の1行を足してから、もう一度 `terraform apply` を実行してください。
 
 ---
 
-## ステップ7: GitHub 側の設定
+## ✅ ステップ7: GitHub 側の設定(完了)
 
 **やること**:
 
@@ -143,7 +161,7 @@ terraform output -raw gh_variable_commands | sh
 
 **やること**:
 
-1. GitHub の **Actions** タブで、ステップ5で失敗した `pipeline` を開き、右上の **Re-run all jobs** を押す
+1. GitHub の **Actions** タブで、一覧の赤い ✕ が付いた **initial** の文字をクリック → 開いた画面の右上にある **Re-run jobs** → **Re-run all jobs** → 確認画面でもう一度 **Re-run jobs** を押す
 2. 待っていると `deploy-production` が黄色の **Waiting** で止まる
 3. 確認用の URL(`:8080` で終わるほう)を開き、`Hello from cicd-demo` と出ていることを見る
 4. Actions の画面に戻って **Review deployments** → `production` にチェック → **Approve and deploy**
