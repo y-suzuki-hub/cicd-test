@@ -157,7 +157,7 @@ terraform output -raw gh_variable_commands | sh
 
 ---
 
-## ステップ8: 初めての本番公開
+## ✅ ステップ8: 初めての本番公開(完了)
 
 **やること**:
 
@@ -176,10 +176,10 @@ terraform output -raw gh_variable_commands | sh
 
 **やること**:
 
-① 見た目を変えて送る(`cd ..` でプロジェクトのフォルダに戻ってから)
+① 見た目を変えて送る
 
 ```bash
-cd .. && sed -i '' 's/Hello from cicd-demo/Hello v2/' src/app.js test/app.test.js && git commit -am "v2" && git push
+cd ~/Projects/cicd-test && sed -i '' 's/Hello from cicd-demo/Hello v2/' src/app.js test/app.test.js && git commit -am "v2" && git push
 ```
 
 ② ステップ8と同じ要領で承認して、本番が `Hello v2` になることを確認する

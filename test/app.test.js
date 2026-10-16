@@ -22,7 +22,7 @@ test('GET /healthz returns ok with version', async () => {
 test('GET / returns html', async () => {
   const res = await fetch(`${base}/`);
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /Hello from cicd-demo/);
+  assert.match(await res.text(), /Hello v2/);
 });
 
 test('unknown path returns 404', async () => {

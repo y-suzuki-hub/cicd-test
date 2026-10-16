@@ -9,7 +9,7 @@ export function createApp({ version = 'dev' } = {}) {
     }
     if (req.url === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end(`<!doctype html><title>cicd-demo</title><h1>Hello from cicd-demo</h1><p>version: ${version}</p>`);
+      res.end(`<!doctype html><title>cicd-demo</title><h1>Hello v2</h1><p>version: ${version}</p>`);
       return;
     }
     res.writeHead(404, { 'content-type': 'text/plain' });
